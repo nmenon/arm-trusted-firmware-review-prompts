@@ -9,8 +9,10 @@ the Trusted Firmware-A (TF-A) project. Rules are drawn from:
 - MISRA C:2012 (as referenced by TF-A)
 - Observations from the `ti-am62l-clk` patch series (changes 45537, 45538)
 
-Ask user for the location of arm-trusted-firmware for local review and
-k3-upstream-boot-build where build test can be performed.
+Ask user for:
+- Path to their local arm-trusted-firmware clone (used for manual review: reading files, applying patches)
+- Path to their build integration tree (a separate clone used for applying and building)
+- Path to the build root directory containing `MAKEALL` (run `./MAKEALL` from there)
 
 ---
 
@@ -18,15 +20,29 @@ k3-upstream-boot-build where build test can be performed.
 
 For each patch under review:
 
-1. Fetch the Gerrit change using the `gerrit-review` MCP tool. Install from https://playbooks.com/mcp/cayirtepeomer/gerrit-code-review-mcp if not available
-2. Fetch all previous version comments for the given patch.
+1. Fetch the Gerrit change using the `gerrit-review` MCP tool with `include_comments: true`.
+   This retrieves all inline review comments left on every prior patchset by all reviewers
+   (author replies count too). Install MCP tool from
+   https://playbooks.com/mcp/cayirtepeomer/gerrit-code-review-mcp if not available.
+2. Extract every inline Gerrit comment from all prior patchsets. For each comment record:
+   - Patchset number it was left on
+   - Reviewer name
+   - File path and line number
+   - The comment text (what the reviewer asked for)
 3. Read all changed files on disk (after applying the patch locally).
-4. check against the previous comments, ensure current code has actually fixed the comments. if not
-   flag.
-5. Check each rule category below.
-6. Apply the patch to the build integration tree and run `./MAKEALL -j$(nproc)`.
-7. Summarize the findings with links to actual place in gerrit that i can click and add comments if
-   appropriate.
+4. For each prior Gerrit comment, look at the current patchset code and determine whether
+   the reviewer's specific request was actually addressed. Mark each as:
+   - Yes   — the code change clearly addresses the comment
+   - No    — the issue described in the comment is still present unchanged
+   - Partial — the code changed but only partially addresses the comment
+   Note: the author marking a thread "resolved" in Gerrit does NOT mean the issue is fixed.
+   Always verify against the actual code.
+5. Check each rule category below for new issues not yet raised in prior comments.
+6. Apply the patch to the build integration tree (separate clone) and run `./MAKEALL` from
+   the build root directory (the directory containing MAKEALL, not the TFA clone itself).
+7. Summarize the findings with links to actual place in gerrit that i can click and add
+   comments if appropriate.
+8. Save the report as a markdown file (see Report Format section).
 
 ---
 
@@ -163,8 +179,8 @@ For each patch under review:
 |----|------|----------|
 | BV-1 | Patch applies cleanly with `git am` (no conflicts, no rejected hunks) | ERROR |
 | BV-2 | `git am` produces no whitespace warnings | WARNING |
-| BV-3 | `./MAKEALL -j$(nproc)` completes with no errors for all targets | ERROR |
-| BV-4 | `./MAKEALL -j$(nproc)` produces no new warnings | WARNING |
+| BV-3 | `./MAKEALL` completes with no errors for all targets | ERROR |
+| BV-4 | `./MAKEALL` produces no new warnings | WARNING |
 
 ---
 
@@ -175,7 +191,7 @@ For each patch in the series:
   1. [ ] Fetch change from Gerrit (gerrit-review MCP)
   2. [ ] Apply to local review tree (git cherry-pick FETCH_HEAD)
   3. [ ] Apply to build tree (git am), note any whitespace warnings (BV-2)
-  4. [ ] Run ./MAKEALL -j$(nproc) (BV-3, BV-4)
+  4. [ ] Run ./MAKEALL from build root directory (not TFA clone) (BV-3, BV-4)
   5. [ ] Check commit message (CM-1 through CM-8)
   6. [ ] Check each new/modified .h file:
          - Header guard (HG-1, HG-2, HG-3)
@@ -193,25 +209,119 @@ For each patch in the series:
          - Braces (BR-1, BR-2)
          - Error handling (EH-1 through EH-5)
   8. [ ] Check Makefile changes (MK-1 through MK-3)
-  9. [ ] Draft review comment and submit via Gerrit
+  9. [ ] Save the review report as /tmp/<change_id>_ps<N>_review_report.md
+         (see Report Format section for required structure)
+ 10. [ ] Draft review comment and submit via Gerrit
 ```
 
 ## Report format
 
-Consolidated Findings Table
-  ┌───────────────────┬─────────────────┬──────┬───────┬──────────────┬───────┬─────────┐
-  │       File        │      Line       │ Rule │  Sev  │  Prexisting  │  Link │ Status  │
-  ├───────────────────┼─────────────────┼──────┼───────┼──────────────┼───────┼─────────┤
+Save the report to `/tmp/<change_id>_ps<N>_review_report.md`.
+Example: `/tmp/45537_ps14_review_report.md`
 
-File: Complete path for the file from tfa folder base
-Line: Line number where the issue is
-Rule: What was broken?
-Sev: Severity of the issue
-Prexiesting: Was this a pre-exiting review comment?
-Link: Direct link to gerrit
-Status: Fixed or not
+The markdown file must contain the following sections in order:
 
-Report previous comments that are not addressed as well for the reviewer to make a judgement.
+### 1. Header
+
+```
+# TF-A Patch Review: Change <id> PS<N>
+
+**Subject:** <commit subject line>
+**Author:** <name> <<email>>
+**Status:** <Gerrit status, e.g. WIP / ACTIVE>
+**Reviewed patchset:** <N> (uploaded <date>)
+**Change URL:** <https://review.trustedfirmware.org/c/TF-A/trusted-firmware-a/+/<id>>
+**Build result:** PASS/FAIL (<details, e.g. "26/26 K3 configs via ./MAKEALL">)
+```
+
+### 2. Previous Patchset Review Comment Links
+
+Table of all prior patchsets that received reviewer comments, with direct links and
+the PS13→PS14 diff view. Used so the reviewer can quickly navigate to prior context.
+
+```markdown
+| Patchset | Reviewer | Comment count | Link |
+|----------|----------|---------------|------|
+| PS<N> | <reviewer name> | <count> | <https://review.trustedfirmware.org/c/.../+/<id>/<N>> |
+
+Diff view PS<N-1> → PS<N>:
+<https://review.trustedfirmware.org/c/.../+/<id>/<N-1>..<N>>
+```
+
+### 3. Summary Counts
+
+Two small tables: one for severity breakdown, one for fix-status breakdown.
+
+```markdown
+| Severity | Count |     | Status      | Count |
+|----------|-------|     |-------------|-------|
+| ERROR    | N     |     | FIXED       | N     |
+| WARNING  | N     |     | PARTIAL     | N     |
+| **Total**| **N** |     | NOT FIXED   | N     |
+                         | NEW         | N     |
+```
+
+### 4. Consolidated Findings Table
+
+One row per finding. Use a `Notes` column for the description so each finding fits on
+one row. Use markdown link syntax `[LNN](url)` in the Link cell.
+
+Column definitions:
+- **File**: complete path from the TFA repo root (backtick-quoted)
+- **Line**: line number(s) where the issue appears; use `(throughout)` for file-wide issues
+- **Rule**: rule ID (e.g. `MA-1`)
+- **Sev**: `ERROR` or `WARNING`
+- **Preexisting**: `Yes` if raised in a prior patchset review; `No (NEW)` if first seen now
+- **Link**: `[LNN](https://review.trustedfirmware.org/c/.../+/<id>/<ps>/<file>@<line>)` — omit `@<line>` for file-level issues
+- **Status**: `FIXED`, `PARTIAL`, `NOT FIXED`, or `NEW`
+- **Notes**: one-line description of the issue
+
+```markdown
+| File | Line | Rule | Sev | Preexisting | Link | Status | Notes |
+|------|------|------|-----|-------------|------|--------|-------|
+| `drivers/ti/clk/include/ti_clk.h` | 29 | MA-1 | ERROR | Yes | [L29](...@29) | NOT FIXED | `TI_MASK_COVER_FOR_NUMBER`: `__builtin_clz(0)` is UB when `number==0` |
+```
+
+### 5. Previous Gerrit Comments Not Addressed
+
+Source: the actual inline Gerrit review comments fetched from the Gerrit API
+(`include_comments: true`), from all prior patchsets, from all reviewers.
+Do NOT derive this section from your own rule-check findings — only include comments
+that a human reviewer explicitly left on the change.
+
+For each prior inline comment, check the current patchset code and record whether the
+reviewer's specific request was addressed. The author marking a thread "resolved" in
+Gerrit is not evidence of a fix — always verify against the code.
+
+```markdown
+## Previous Gerrit Comments Not Addressed
+
+| # | PS | Reviewer | File | Line | Comment Summary | Addressed? |
+|---|----|----------|------|------|-----------------|------------|
+| 1 | 13 | Nishanth Menon | `ti_clk.h` | 32 | `TI_FREQ_MHZ` uses `double` — no floating-point in firmware | No |
+| 2 | 12 | Andrew Davis | `ti_clk_mux.c` | 43 | missing `(uintptr_t)` cast on `reg->reg` | Partial |
+
+**Summary:** N Addressed, N Partial, N Not Addressed out of N prior comments.
+Note: all N were marked "resolved" by the author in PS<N>.
+```
+
+"Addressed?" = Yes / No / Partial
+
+### 6. Build Verification
+
+```markdown
+## Build Verification
+
+| ID | Rule | Result | Notes |
+|----|------|--------|-------|
+| BV-1 | Patch applies cleanly | PASS/FAIL | |
+| BV-2 | No whitespace warnings from `git am` | PASS/FAIL | |
+| BV-3 | `./MAKEALL` completes with no errors | PASS/FAIL | <N>/<N> configs pass |
+| BV-4 | `./MAKEALL` produces no new warnings | PASS/FAIL | |
+```
+
+Include a note if the platform under review is not in MAKEALL's defconfig list (i.e. the
+new driver code is not actually compiled by MAKEALL).
 
 ---
 
