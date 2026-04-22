@@ -71,6 +71,7 @@ For each patch under review:
 | WS-5 | Exactly one newline at EOF; no trailing blank lines | ERROR |
 | WS-6 | ≤80 chars/line (soft; exceed only for readability) | WARNING |
 | WS-7 | New `.c` `.h` `.S` `.mk`: first line `/* SPDX-License-Identifier: BSD-3-Clause */`; missing/conflicting = blocker | ERROR |
+| WS-8 | Corporate copyright line format: `Copyright (C) YEAR <Company Full Legal Name> - https://<company-url>` (uppercase `C`, full legal entity name, `https://` URL, no trailing slash). YEAR is a single year or range (`YYYY` or `YYYY-YYYY`); new file added in a prior year should carry range through current year (e.g. `2025-2026`); single year acceptable only if creation and current year match. Common wrong variants: lowercase `c`, abbreviated company name, `http://`, trailing `/`, year not updated to reflect current year. | WARNING |
 
 ### 3. Comments
 
@@ -97,7 +98,7 @@ For each patch under review:
 
 | ID | Rule | Severity |
 |----|------|----------|
-| IN-1 | Three include groups, blank-line separated: (1) system/libc (2) project `<include/...>` (3) platform `<plat/...>` | ERROR |
+| IN-1 | Three include groups, blank-line separated: (1) system/libc (2) project `<include/...>` (3) platform `<plat/...>`. No blank lines within a group. | ERROR |
 | IN-2 | Within each group: alphabetical order | WARNING |
 | IN-3 | `<...>` for non-local headers; `"..."` for same-dir | WARNING |
 | IN-4 | No project/platform headers before system headers | ERROR |
@@ -115,6 +116,7 @@ For each patch under review:
 | NM-5 | Non-`static` platform symbols: platform prefix required (`ti_`, `TI_`, `k3_`, `K3_`, `am62l_`, `AM62L_`, …). Unprefixed names at non-static scope silently shadow TF-A common APIs or stdlib — e.g. `log2` shadows `<math.h>`, `board_init` collides with future TF-A API. Prohibited. | ERROR |
 | NM-6 | No `__`-prefixed identifiers in platform/driver code; reserved for compiler + stdlib (ISO C11 §7.1.3) | ERROR |
 | NM-7 | Search `include/` `lib/` `drivers/` for equivalent before adding new util macro/fn. Example: `FIELD_GET`/`FIELD_PREP`/`__bf_shf` already in `include/drivers/cadence/cdns_nand.h`. | WARNING |
+| NM-8 | TI platform header filenames: `ti_` prefix required for new headers in `drivers/ti/` and `plat/ti/` (e.g. `ti_scmi_clock.h` not `scmi_clock.h`). Unprefixed names in the platform tree collide with upstream TF-A or driver headers. | WARNING |
 | NM-9 | CPU feature flags: `ENABLE_FEAT_<FEATURE>` prefix required. Generic `ENABLE_<X>` deprecated. Legacy replacement: one-cycle backward compat via `constraints.mk` deprecation warning. | WARNING |
 
 ### 7. Types and Portability
@@ -146,6 +148,7 @@ For each patch under review:
 | MA-6 | HW register state literals (e.g. PSC `0U`/`2U`): named macros + TRM section citation required; bare magic numbers prohibited | WARNING |
 | MA-7 | `#define FEAT_X 1` + `#ifdef FEAT_X ... #else ...` = permanent dead `#else`. Remove dead block, make flag configurable, or comment that `#else` is a retained reference/stub. Exception: `constraints.mk` backward-compat aliases (per NM-9) may use this pattern transiently during a one-cycle deprecation period — must be removed in the following release. | ERROR |
 | MA-8 | Size-critical structs: `CASSERT(sizeof(struct_name) == EXPECTED_BYTES, ...)` required | WARNING |
+| MA-9 | No data array definitions in `.h` files. Arrays/structs with initializers (`foo_t table[] = {...}`) must live in `.c` files; headers declare only `extern`. Data definitions in headers cause multiple-definition linker errors if included in more than one TU. | ERROR |
 
 ### 9. Variable Declarations
 
@@ -193,6 +196,8 @@ For each patch under review:
 | EH-9 | Int-returning fns must propagate real errors. Always-`return 0` fn → use `void` or document rationale. `if (ret != 0)` after always-0 fn = dead code. Don't swallow timeouts/failures. | WARNING |
 | EH-10 | Log levels: `VERBOSE`=debug traces; `INFO`=init milestones; `WARN`=recoverable + fallback; `ERROR`=unrecoverable → `panic()`/`plat_error_handler()`. Wrong level = flagged. | WARNING |
 | EH-11 | Check return values of called functions before using output. Unchecked failures silently propagate corrupt state. Exception: functions documented as always-succeeding (`void` or contract-guaranteed `0`). | WARNING |
+| EH-12 | Never use `assert()` as a bounds/security check on inputs from untrusted sources (NS shared memory, SCMI agent_id, SCMI pd_id/clock_id, external callers). `assert()` triggers `panic()` in secure world = NS-triggered DoS. Replace with `if (id >= MAX) return ERROR_CODE;`. | ERROR |
+| EH-13 | Integer arithmetic used for tolerance/range calculations (e.g. `min = val/10*9`): verify edge cases where truncation causes incorrect results (e.g. `val < 10` → `min=max=0`). Guard against overflow for large values (`val/10*11` overflows `uint64_t`). | WARNING |
 
 ### 13. Concurrency and Atomic Access
 
@@ -239,7 +244,22 @@ For each patch under review:
 | PS-4 | New/modified platform port: update `docs/about/maintainers.rst` with path + code owner. Missing = no `Code-Owner-Review+1` = no merge. | WARNING |
 | PS-5 | Series ordering: foundational first — shared headers before consumers; driver core before Makefile; common code before platform-specific. Wrong order forces reviewers to read patches against missing context. | WARNING |
 
-### 18. AI-Assisted Contributions
+### 18. Correctness and Security
+
+Checks beyond style — verify the code actually does what it claims.
+
+| ID | Rule | Severity |
+|----|------|----------|
+| CS-1 | `assert()` on inputs from NS world = DoS. Use bounds-check + error return (see EH-12). | ERROR |
+| CS-2 | Verify array accesses from external/SCMI inputs are bounds-checked before use (e.g. `pd_id < ARRAY_SIZE(table)`, `scmi_id < clock_table_size`). Out-of-bounds in secure world = privilege escalation. | ERROR |
+| CS-3 | Check for signed/unsigned mismatch on error return comparisons: `unsigned int *p; ... if (*p < 0)` is always false — error never detected. | ERROR |
+| CS-4 | Check for dead code caused by hardcoded values (e.g. `flags = 0U` with `if (flags & EXCLUSIVE)` never true). Document or remove. | WARNING |
+| CS-5 | Initialization ordering: subsystem N must be fully initialized before any caller can invoke it via N's API. If SCMI transport is live but clock ops not yet registered, any SCMI clock request races with uninitialized state. | WARNING |
+| CS-6 | Memory region mappings: end address must not exceed last valid register in TRM. Map only what is required; overmapping grants device-mode access to unmapped holes (data abort risk). Cite TRM section and address range. | WARNING |
+| CS-7 | `return 0` / `return SCMI_SUCCESS` at function end must be verified: ensure no intermediate `ret = -EIO` path exists that is then silently discarded. Final return must propagate real status. | ERROR |
+| CS-8 | For `plat_scmi_*` hooks: verify that all SCMI inputs (agent_id, scmi_id, pd_id, parent_id) are range-checked against actual table sizes before array access. NS caller controls these fields via shared memory. | ERROR |
+
+### 19. AI-Assisted Contributions
 
 Per https://www.trustedfirmware.org/aipolicy/
 
@@ -273,8 +293,8 @@ For each patch in the series:
          - Inline function documentation (CO-6, CO-7, CO-8)
          - Trailing blank line at EOF (WS-5)
   7. [ ] Check each new/modified .c file:
-         - SPDX license header present (WS-7)
-         - Include ordering (IN-1 through IN-4, IN-6)
+         - SPDX license header + corporate copyright format (WS-7, WS-8)
+         - Include ordering (IN-1 through IN-4, IN-6: no blank within group)
          - Unused includes (IN-5): verify every `#include` is used
          - Variable declarations (VD-1 through VD-5); early returns OK (VD-4)
          - Types (TY-1, TY-3 through TY-12)
@@ -282,8 +302,10 @@ For each patch in the series:
          - Static helper comments (CO-5)
          - Spacing (SP-1 through SP-7)
          - Braces (BR-1 through BR-4)
-         - Error handling (EH-1 through EH-11)
+         - Error handling (EH-1 through EH-13)
          - Atomic + barrier consistency (CA-1 through CA-3)
+         - Correctness/security: bounds on SCMI inputs (CS-1..CS-8)
+         - Deep analysis: dead code, silent error drops, init ordering (CS-4..CS-7)
   8. [ ] Check Makefile changes (MK-1 through MK-3)
   8a.[ ] Check patch series atomicity (PS-1): verify each patch builds cleanly without its successors
   8b.[ ] New platform port? Check maintainers.rst + docs/plat/ updated (PS-4, PS-5, DOC-2)
@@ -343,8 +365,11 @@ Two tables: severity breakdown + fix-status breakdown.
 ### 4. Consolidated Findings Table
 
 One row per finding. Columns:
-- **File**: full path from TFA root (backtick-quoted)
-- **Line**: line number(s); `(throughout)` for file-wide
+- **File**: full path from TFA root (backtick-quoted). Use `commit` for commit message.
+- **Line**: line number(s) as clickable Gerrit links using format:
+  - Regular file: `[LINE](https://review.trustedfirmware.org/c/TF-A/trusted-firmware-a/+/<id>/<ps>/<filepath>@<line>)`
+  - Commit message: `[LINE](https://review.trustedfirmware.org/c/TF-A/trusted-firmware-a/+/<id>/<ps>//COMMIT_MSG@<line>)` (double-slash before COMMIT_MSG is correct Gerrit format)
+  - `(throughout)` for file-wide issues with no specific line
 - **Rule**: rule ID (e.g. `MA-1`)
 - **Sev**: `ERROR` or `WARNING`
 - **Preexisting**: `Yes` if prior review; `No (NEW)` if first seen
@@ -394,6 +419,22 @@ Note: all N were marked "resolved" by the author in PS<N>.
 ```
 
 Note if platform not in MAKEALL defconfig list (driver not compiled by MAKEALL).
+
+### 7. Agentic Independent Review (optional but recommended)
+
+Use an independent agentic review (e.g. a second Claude session, a separate AI review environment, or another LLM) to independently verify key findings via voting/consensus. Report accuracy of each agentic finding vs manual analysis. Note any false positives or false negatives.
+
+### 8. Deep Correctness and Security Analysis
+
+For each changed function, check:
+- All error paths propagate `ret` correctly — no `return 0` silently discarding `-EIO`
+- SCMI inputs (`agent_id`, `pd_id`, `scmi_id`) bounds-checked before array access
+- No `assert()` on NS-controlled inputs (DoS risk)
+- Signed/unsigned mismatch on error return checks (`if (*unsigned_ptr < 0)` = always false)
+- Integer overflow in tolerance/range arithmetic
+- No dead code from hardcoded variables (`flags = 0U`)
+- Initialization ordering: APIs not callable before subsystem is ready
+- Memory map regions don't exceed last valid register (cite TRM)
 
 ---
 
