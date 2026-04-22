@@ -1,18 +1,17 @@
 # TF-A Patch Review Plan
 
-This document codifies the rules applied when reviewing patches submitted to
-the Trusted Firmware-A (TF-A) project. Rules are drawn from:
+Rules for reviewing TF-A patches. Sources:
 
 - `docs/process/coding-style.rst`
 - `docs/process/coding-guidelines.rst`
 - `docs/process/commit-style.rst`
 - MISRA C:2012 (as referenced by TF-A)
-- Observations from the `ti-am62l-clk` patch series (changes 45537, 45538)
+- Observations from `ti-am62l-clk` series (changes 45537, 45538)
 
 Ask user for:
-- Path to their local arm-trusted-firmware clone (used for manual review: reading files, applying patches)
-- Path to their build integration tree (a separate clone used for applying and building)
-- Path to the build root directory containing `MAKEALL` (run `./MAKEALL` from there)
+- Path to local arm-trusted-firmware clone (reading files, applying patches)
+- Path to build integration tree (separate clone for apply + build)
+- Path to build root containing `MAKEALL` (run `./MAKEALL` from there)
 
 ---
 
@@ -20,29 +19,25 @@ Ask user for:
 
 For each patch under review:
 
-1. Fetch the Gerrit change using the `gerrit-review` MCP tool with `include_comments: true`.
-   This retrieves all inline review comments left on every prior patchset by all reviewers
-   (author replies count too). Install MCP tool from
-   https://playbooks.com/mcp/cayirtepeomer/gerrit-code-review-mcp if not available.
-2. Extract every inline Gerrit comment from all prior patchsets. For each comment record:
-   - Patchset number it was left on
+1. Fetch Gerrit change via `gerrit-review` MCP with `include_comments: true`.
+   Retrieves all inline comments from all prior patchsets (author replies included).
+   Install from https://playbooks.com/mcp/cayirtepeomer/gerrit-code-review-mcp if missing.
+2. Extract every inline Gerrit comment from prior patchsets. For each record:
+   - Patchset number
    - Reviewer name
-   - File path and line number
-   - The comment text (what the reviewer asked for)
-3. Read all changed files on disk (after applying the patch locally).
-4. For each prior Gerrit comment, look at the current patchset code and determine whether
-   the reviewer's specific request was actually addressed. Mark each as:
-   - Yes   — the code change clearly addresses the comment
-   - No    — the issue described in the comment is still present unchanged
-   - Partial — the code changed but only partially addresses the comment
-   Note: the author marking a thread "resolved" in Gerrit does NOT mean the issue is fixed.
-   Always verify against the actual code.
-5. Check each rule category below for new issues not yet raised in prior comments.
-6. Apply the patch to the build integration tree (separate clone) and run `./MAKEALL` from
-   the build root directory (the directory containing MAKEALL, not the TFA clone itself).
-7. Summarize the findings with links to actual place in gerrit that i can click and add
-   comments if appropriate.
-8. Save the report as a markdown file (see Report Format section).
+   - File path + line number
+   - Comment text (what reviewer asked)
+3. Read all changed files on disk (after applying patch locally).
+4. For each prior Gerrit comment, check current patchset code — was reviewer's request addressed?
+   - Yes — code clearly addresses comment
+   - No — issue still present unchanged
+   - Partial — code changed but only partly fixes it
+   Note: author marking thread "resolved" in Gerrit ≠ fixed. Always verify against code.
+5. Check each rule category below for new issues not in prior comments.
+6. Apply patch to build integration tree (separate clone). Run `./MAKEALL` from build root
+   (dir containing MAKEALL, not TFA clone itself).
+7. Summarize findings with Gerrit links for direct commenting.
+8. Save report as markdown file (see Report Format section).
 
 ---
 
@@ -241,10 +236,10 @@ For each patch in the series:
 
 ## Report format
 
-Save the report to `/tmp/<change_id>_ps<N>_review_report.md`.
+Save to `/tmp/<change_id>_ps<N>_review_report.md`.
 Example: `/tmp/45537_ps14_review_report.md`
 
-The markdown file must contain the following sections in order:
+Required sections in order:
 
 ### 1. Header
 
@@ -261,8 +256,7 @@ The markdown file must contain the following sections in order:
 
 ### 2. Previous Patchset Review Comment Links
 
-Table of all prior patchsets that received reviewer comments, with direct links and
-the PS13→PS14 diff view. Used so the reviewer can quickly navigate to prior context.
+Table of prior patchsets with reviewer comments. Include diff view link for quick navigation.
 
 ```markdown
 | Patchset | Reviewer | Comment count | Link |
@@ -275,7 +269,7 @@ Diff view PS<N-1> → PS<N>:
 
 ### 3. Summary Counts
 
-Two small tables: one for severity breakdown, one for fix-status breakdown.
+Two tables: severity breakdown + fix-status breakdown.
 
 ```markdown
 | Severity | Count |     | Status      | Count |
@@ -288,18 +282,15 @@ Two small tables: one for severity breakdown, one for fix-status breakdown.
 
 ### 4. Consolidated Findings Table
 
-One row per finding. Use a `Notes` column for the description so each finding fits on
-one row. Use markdown link syntax `[LNN](url)` in the Link cell.
-
-Column definitions:
-- **File**: complete path from the TFA repo root (backtick-quoted)
-- **Line**: line number(s) where the issue appears; use `(throughout)` for file-wide issues
+One row per finding. Columns:
+- **File**: full path from TFA repo root (backtick-quoted)
+- **Line**: line number(s); `(throughout)` for file-wide issues
 - **Rule**: rule ID (e.g. `MA-1`)
 - **Sev**: `ERROR` or `WARNING`
-- **Preexisting**: `Yes` if raised in a prior patchset review; `No (NEW)` if first seen now
-- **Link**: `[LNN](https://review.trustedfirmware.org/c/.../+/<id>/<ps>/<file>@<line>)` — omit `@<line>` for file-level issues
+- **Preexisting**: `Yes` if in prior review; `No (NEW)` if first seen
+- **Link**: `[LNN](https://review.trustedfirmware.org/c/.../+/<id>/<ps>/<file>@<line>)` — omit `@<line>` for file-level
 - **Status**: `FIXED`, `PARTIAL`, `NOT FIXED`, or `NEW`
-- **Notes**: one-line description of the issue
+- **Notes**: one-line description
 
 ```markdown
 | File | Line | Rule | Sev | Preexisting | Link | Status | Notes |
@@ -309,14 +300,11 @@ Column definitions:
 
 ### 5. Previous Gerrit Comments Not Addressed
 
-Source: the actual inline Gerrit review comments fetched from the Gerrit API
-(`include_comments: true`), from all prior patchsets, from all reviewers.
-Do NOT derive this section from your own rule-check findings — only include comments
-that a human reviewer explicitly left on the change.
+Source: inline Gerrit comments from Gerrit API (`include_comments: true`), all prior patchsets, all reviewers.
+Do NOT populate from own rule findings — only human reviewer comments on the change.
 
-For each prior inline comment, check the current patchset code and record whether the
-reviewer's specific request was addressed. The author marking a thread "resolved" in
-Gerrit is not evidence of a fix — always verify against the code.
+For each prior comment, verify in current code whether request was addressed.
+Author marking "resolved" in Gerrit ≠ fixed — always check code.
 
 ```markdown
 ## Previous Gerrit Comments Not Addressed
@@ -345,15 +333,14 @@ Note: all N were marked "resolved" by the author in PS<N>.
 | BV-4 | `./MAKEALL` produces no new warnings | PASS/FAIL | |
 ```
 
-Include a note if the platform under review is not in MAKEALL's defconfig list (i.e. the
-new driver code is not actually compiled by MAKEALL).
+Note if platform not in MAKEALL defconfig list (new driver code not actually compiled by MAKEALL).
 
 ---
 
 ## Severity Definitions
 
-- **ERROR**: Must be fixed before merging. Would fail CI or violate a hard rule.
-- **WARNING**: Should be fixed; reviewer will call it out but may not block merge.
+- **ERROR**: Fix before merge. Fails CI or violates hard rule.
+- **WARNING**: Should fix; reviewer flags but may not block merge.
 
 ---
 
