@@ -20,24 +20,25 @@ Ask user for:
 For each patch under review:
 
 1. Fetch Gerrit change via `gerrit-review` MCP with `include_comments: true`.
-   Retrieves all inline comments from all prior patchsets (author replies included).
-   Install from https://playbooks.com/mcp/cayirtepeomer/gerrit-code-review-mcp if missing.
+   Retrieves inline comments from all prior patchsets (author replies included).
+   Install: https://playbooks.com/mcp/cayirtepeomer/gerrit-code-review-mcp
 2. Extract every inline Gerrit comment from prior patchsets. For each record:
    - Patchset number
    - Reviewer name
    - File path + line number
-   - Comment text (what reviewer asked)
-3. Read all changed files on disk (after applying patch locally).
-4. For each prior Gerrit comment, check current patchset code — was reviewer's request addressed?
-   - Yes — code clearly addresses comment
-   - No — issue still present unchanged
-   - Partial — code changed but only partly fixes it
-   Note: author marking thread "resolved" in Gerrit ≠ fixed. Always verify against code.
-5. Check each rule category below for new issues not in prior comments.
+   - Comment text
+3. Read all changed files (after applying patch locally).
+4. For each prior Gerrit comment, check current code — addressed?
+   - Yes — clearly addressed
+   - No — still present
+   - Partial — only partly fixed
+   Note: "resolved" in Gerrit ≠ fixed. Always verify against code.
+5. Check rule categories below for new issues not in prior comments.
 6. Apply patch to build integration tree (separate clone). Run `./MAKEALL` from build root
    (dir containing MAKEALL, not TFA clone itself).
-7. Summarize findings with Gerrit links for direct commenting.
-8. Save report as markdown file (see Report Format section).
+7. Summarize findings with Gerrit links.
+8. Save report (see Report Format section).
+9. Ask: "Submit to Gerrit? (default: NO)" — wait for explicit YES. Never submit autonomously.
 
 ---
 
@@ -47,157 +48,194 @@ For each patch under review:
 
 | ID | Rule | Severity |
 |----|------|----------|
-| CM-1 | Subject line follows Conventional Commits: `<type>(<scope>): <description>` | ERROR |
-| CM-2 | Type is one of: `feat fix build ci docs perf refactor revert style test chore` | ERROR |
-| CM-3 | Type, scope, and first letter of description are all lowercase | ERROR |
-| CM-4 | Body explains *what* the change does and *why* (motivation, impact, alternatives) | WARNING |
-| CM-5 | Body provides enough context for reviewers unfamiliar with the subsystem | WARNING |
-| CM-6 | `Signed-off-by:` trailer present with real name and email | ERROR |
-| CM-7 | `Change-Id:` trailer present and unique | ERROR |
-| CM-8 | Scope exists in `changelog.yaml` or a new entry is added | WARNING |
+| CM-1 | Subject: `<type>(<scope>): <description>` (Conventional Commits) | ERROR |
+| CM-2 | Type ∈ `feat fix build ci docs perf refactor revert style test chore` | ERROR |
+| CM-3 | Type, scope, description first letter: all lowercase | ERROR |
+| CM-4 | Body: *what* + *why* (motivation, impact, alternatives) | WARNING |
+| CM-5 | Body: enough context for reviewer unfamiliar with subsystem | WARNING |
+| CM-6 | `Signed-off-by:` present; real name + email | ERROR |
+| CM-7 | `Change-Id:` present + unique | ERROR |
+| CM-8 | Scope in `changelog.yaml`; add entry if missing | WARNING |
+| CM-9 | New build options → `docs/getting_started/build-options.rst`. Dependencies → `make_helpers/constraints.mk` with informative `$(error ...)`/`$(warning ...)` | ERROR |
 
 ### 2. File Encoding and Whitespace
 
 | ID | Rule | Severity |
 |----|------|----------|
-| WS-1 | Source files use UTF-8 encoding | ERROR |
-| WS-2 | Line endings are Unix (LF only, no CRLF) | ERROR |
-| WS-3 | Indentation uses tabs (8-column), not spaces | ERROR |
-| WS-4 | No trailing whitespace on any line | ERROR |
-| WS-5 | File ends with exactly one newline (no trailing blank lines) | ERROR |
-| WS-6 | Lines are at most 80 characters (soft limit; exceed only when readability demands) | WARNING |
+| WS-1 | UTF-8 encoding | ERROR |
+| WS-2 | LF only (no CRLF) | ERROR |
+| WS-3 | Tabs for indentation (8-col), not spaces | ERROR |
+| WS-4 | No trailing whitespace | ERROR |
+| WS-5 | Exactly one newline at EOF; no trailing blank lines | ERROR |
+| WS-6 | ≤80 chars/line (soft; exceed only for readability) | WARNING |
+| WS-7 | New `.c` `.h` `.S` `.mk`: first line `/* SPDX-License-Identifier: BSD-3-Clause */`; missing/conflicting = blocker | ERROR |
 
 ### 3. Comments
 
 | ID | Rule | Severity |
 |----|------|----------|
-| CO-1 | No `//` single-line comments; use `/* ... */` only | ERROR |
-| CO-2 | No Doxygen-style `/** \brief ... */` comments; plain `/* ... */` preferred | WARNING |
-| CO-3 | No informal/unprofessional language in comments (e.g., "hack", "fixme", "workaround" without explanation) | WARNING |
-| CO-4 | Comments describe *why*, not *what* (the code itself shows what) | WARNING |
+| CO-1 | No `//` comments; `/* ... */` only | ERROR |
+| CO-2 | No `/** \brief ... */` Doxygen style; use `/* ... */` | WARNING |
+| CO-3 | No `hack`/`fixme`/`workaround` without explanation | WARNING |
+| CO-4 | Comments: *why*, not *what* | WARNING |
+| CO-5 | Non-trivial `static` helpers: comment explaining purpose + `bool` param semantics when not inferrable from name | WARNING |
+| CO-6 | `static inline` in headers: doc comment required, same as exported functions. Trivial one-liner wrappers (single expression, self-evident name) are exempt — same "non-trivial" threshold as CO-5. | WARNING |
+| CO-7 | Return type ↔ docs must agree; `uint32_t` return with "true/false" docs = ambiguous → fix type or docs | WARNING |
+| CO-8 | Comments must reflect actual intent; don't call intentional behavior "workaround"/"hack"/"bad config" — misleads reviewers | WARNING |
 
 ### 4. Header Guards
 
 | ID | Rule | Severity |
 |----|------|----------|
-| HG-1 | Every header has an `#ifndef HEADER_NAME_H` / `#define HEADER_NAME_H` guard | ERROR |
-| HG-2 | Closing `#endif` carries a comment matching the guard: `#endif /* HEADER_NAME_H */` | WARNING |
-| HG-3 | Guard name matches the filename in all-uppercase with underscores | WARNING |
+| HG-1 | Every header: `#ifndef HEADER_NAME_H` / `#define HEADER_NAME_H` guard | ERROR |
+| HG-2 | `#endif` carries matching comment: `#endif /* HEADER_NAME_H */` | WARNING |
+| HG-3 | Guard name = filename all-uppercase with underscores | WARNING |
 
 ### 5. Include Ordering
 
 | ID | Rule | Severity |
 |----|------|----------|
-| IN-1 | Includes in three groups separated by blank lines: (1) system/libc, (2) project `<include/...>`, (3) platform `<plat/...>` | ERROR |
-| IN-2 | Within each group, includes are in alphabetical order | WARNING |
-| IN-3 | Use `<...>` for headers not in the same directory; `"..."` for same-directory headers | WARNING |
-| IN-4 | No project or platform headers appear before system headers | ERROR |
-| IN-5 | No unused `#include` directives — every included header must have at least one identifier (macro, type, function) from it actually used in the file; verify by checking all identifiers in the header against usage in the .c file | WARNING |
+| IN-1 | Three include groups, blank-line separated: (1) system/libc (2) project `<include/...>` (3) platform `<plat/...>` | ERROR |
+| IN-2 | Within each group: alphabetical order | WARNING |
+| IN-3 | `<...>` for non-local headers; `"..."` for same-dir | WARNING |
+| IN-4 | No project/platform headers before system headers | ERROR |
+| IN-5 | No unused `#include`; every header must contribute ≥1 used identifier (macro/type/fn) | WARNING |
+| IN-6 | `<cdefs.h>` = TF-A project header (`include/cdefs.h`) → group 2, not group 1. All `include/` tree headers = group 2. | ERROR |
 
 ### 6. Naming
 
 | ID | Rule | Severity |
 |----|------|----------|
-| NM-1 | Functions and local variables: `lower_snake_case` | ERROR |
+| NM-1 | Functions + local variables: `lower_snake_case` | ERROR |
 | NM-2 | Preprocessor macros: `UPPER_SNAKE_CASE` | ERROR |
 | NM-3 | No abbreviations that obscure meaning | WARNING |
-| NM-4 | Typos in identifiers or comments must be corrected | WARNING |
-| NM-5 | Platform-specific macros, functions, and types that are not `static` must carry a platform-specific prefix (`ti_`, `TI_`, `k3_`, `K3_`, `am62l_`, `AM62L_` etc.) to avoid future conflicts with TF-A common APIs or standard library names. Generic names like `FIELD_GET`, `FIELD_PREP`, `log2`, `board_init` with no prefix are prohibited at non-static scope. | ERROR |
-| NM-6 | Never define identifiers beginning with `__` (double underscore) in platform or driver code; this namespace is reserved for the compiler and C standard library implementation per ISO C11 §7.1.3. | ERROR |
-| NM-7 | Before introducing a new platform utility macro or function, search the upstream TF-A tree (`include/`, `lib/`, `drivers/`) for an existing equivalent. Prefer reusing or contributing to a common header over duplicating. Example: `FIELD_GET`/`FIELD_PREP`/`__bf_shf` already exist in `include/drivers/cadence/cdns_nand.h`. | WARNING |
+| NM-4 | Fix typos in identifiers + comments | WARNING |
+| NM-5 | Non-`static` platform symbols: platform prefix required (`ti_`, `TI_`, `k3_`, `K3_`, `am62l_`, `AM62L_`, …). Unprefixed names at non-static scope silently shadow TF-A common APIs or stdlib — e.g. `log2` shadows `<math.h>`, `board_init` collides with future TF-A API. Prohibited. | ERROR |
+| NM-6 | No `__`-prefixed identifiers in platform/driver code; reserved for compiler + stdlib (ISO C11 §7.1.3) | ERROR |
+| NM-7 | Search `include/` `lib/` `drivers/` for equivalent before adding new util macro/fn. Example: `FIELD_GET`/`FIELD_PREP`/`__bf_shf` already in `include/drivers/cadence/cdns_nand.h`. | WARNING |
+| NM-9 | CPU feature flags: `ENABLE_FEAT_<FEATURE>` prefix required. Generic `ENABLE_<X>` deprecated. Legacy replacement: one-cycle backward compat via `constraints.mk` deprecation warning. | WARNING |
 
 ### 7. Types and Portability
 
 | ID | Rule | Severity |
 |----|------|----------|
-| TY-1 | Use `uintptr_t` for MMIO register addresses (never `uint32_t` or `unsigned long`) | ERROR |
-| TY-2 | Avoid new `typedef` declarations; prefer `struct foo` / `enum foo` directly | WARNING |
-| TY-3 | Use `UINT_MAX` (not `ULONG_MAX`) when the variable being compared is `uint32_t` | ERROR |
-| TY-4 | Integer literals assigned to unsigned variables carry the `U` suffix (e.g., `1U`) | WARNING |
-| TY-5 | No floating-point types (`double`, `float`) in driver/firmware code | ERROR |
-| TY-6 | No use of `long` or `unsigned long`; use `long long` / `uint64_t` for 64-bit values | WARNING |
-| TY-7 | No implicit boolean conversions from non-boolean expressions (MISRA 14.4): pointer comparisons must be explicit `(p != NULL)` not `(p)`; integer comparisons must be explicit `(x != 0U)` not `(x)` | WARNING |
-| TY-8 | Pointer to MMIO or arbitrary address: use `uintptr_t` (see coding-guidelines §pointer types) | ERROR |
-| TY-9 | Printf format specifiers must match argument type: use `%u` (or `PRIu32` from `<inttypes.h>`) for `uint32_t`, not `%d`; similarly `%lu`/`PRIu64` for `uint64_t`. Mismatched format specifiers are UB and cause compiler warnings. | ERROR |
+| TY-1 | `uintptr_t` for MMIO addresses; not `uint32_t` or `unsigned long` | ERROR |
+| TY-2 | No new `typedef`; use `struct foo` / `enum foo` directly | WARNING |
+| TY-3 | `UINT_MAX` not `ULONG_MAX` when comparing `uint32_t` | ERROR |
+| TY-4 | Unsigned integer literals: `U` suffix (e.g. `1U`) | WARNING |
+| TY-5 | No `double`/`float` in driver/firmware code | ERROR |
+| TY-6 | No `long`/`unsigned long`; use `long long`/`uint64_t` for 64-bit | WARNING |
+| TY-7 | No implicit bool conversion (MISRA 14.4): `(p != NULL)` not `(p)`; `(x != 0U)` not `(x)` | WARNING |
+| TY-8 | `uintptr_t` for MMIO/arbitrary address pointers (coding-guidelines §pointer types) | ERROR |
+| TY-9 | Format specifier must match type: `%u`/`PRIu32` for `uint32_t` (not `%d`); `%lu`/`PRIu64` for `uint64_t`. Mismatch = UB + compiler warning. | ERROR |
+| TY-10 | `uint32_t` literals: `U` suffix (`0U`, `1U`), not `UL`. `UL` = 64-bit on AArch64 → implicit width conversion. Exception: `uintptr_t` MMIO macros may use `UL`/`ULL`. | WARNING |
+| TY-11 | Bitwise flag ops: `(uint32_t)` casts must be consistent within a function. Mix of cast/no-cast on same field hides truncation bugs. | WARNING |
+| TY-12 | `size_t` for `sizeof()` results, element counts, and buffer lengths passed to `memcpy`/`memset`. `uint32_t` truncates on 64-bit for sizes >4 GiB and causes signed/unsigned warnings with stdlib. | WARNING |
 
 ### 8. Macros
 
 | ID | Rule | Severity |
 |----|------|----------|
-| MA-1 | Macros that expand to expressions must not contain undefined behavior (e.g., `__builtin_clz(0)`) | ERROR |
-| MA-2 | Bit-field macros (`BIT(n)`) must not skip values without explanation | WARNING |
-| MA-3 | Prefer `CASSERT` (from `include/lib/cassert.h`) over project-local compile-time assertion macros | WARNING |
-| MA-4 | Do not introduce duplicate functionality already present in TF-A headers | WARNING |
+| MA-1 | Macro expressions: no UB (e.g. `__builtin_clz(0)` when arg may be 0) | ERROR |
+| MA-2 | `BIT(n)` flag macros: no skipped values without comment | WARNING |
+| MA-3 | Prefer `CASSERT` (`include/lib/cassert.h`) over local compile-time assert macros | WARNING |
+| MA-4 | No duplicate functionality already in TF-A headers | WARNING |
+| MA-5 | Use `ARRAY_SIZE()` (`include/lib/utils_def.h`) instead of hardcoded counts: `for (i = 0U; i < ARRAY_SIZE(arr); i++)` | WARNING |
+| MA-6 | HW register state literals (e.g. PSC `0U`/`2U`): named macros + TRM section citation required; bare magic numbers prohibited | WARNING |
+| MA-7 | `#define FEAT_X 1` + `#ifdef FEAT_X ... #else ...` = permanent dead `#else`. Remove dead block, make flag configurable, or comment that `#else` is a retained reference/stub. Exception: `constraints.mk` backward-compat aliases (per NM-9) may use this pattern transiently during a one-cycle deprecation period — must be removed in the following release. | ERROR |
+| MA-8 | Size-critical structs: `CASSERT(sizeof(struct_name) == EXPECTED_BYTES, ...)` required | WARNING |
 
 ### 9. Variable Declarations
 
 | ID | Rule | Severity |
 |----|------|----------|
-| VD-1 | Variable declarations must appear at the top of their enclosing block (C90/MISRA rule 8.1) | ERROR |
-| VD-2 | No variable declarations inside `else` blocks or `for`/`while` loop bodies | ERROR |
-| VD-3 | Variables that are not modified after initialization should be `const` | WARNING |
+| VD-1 | Declarations at top of enclosing block (C90/MISRA 8.1) | ERROR |
+| VD-2 | No declarations inside `else` or loop bodies | ERROR |
+| VD-3 | Unmodified variables: declare `const` | WARNING |
+| VD-4 | MISRA 15.5 (single exit) = Advisory; NOT enforced. Early returns OK + preferred for readability. VD-1 still applies regardless of return count. | INFO |
+| VD-5 | No unnecessary forward declarations for `static` fns. Reorganize so helpers defined before first use; forward decls in single TU = maintenance burden, no compiler benefit. | WARNING |
 
 ### 10. Braces and Control Flow
 
 | ID | Rule | Severity |
 |----|------|----------|
-| BR-1 | All conditional bodies (`if`, `for`, `while`, `do`) must use braces, even single-statement bodies (MISRA 15.6) | ERROR |
-| BR-2 | Opening brace on same line as control statement (K&R style); on new line for function definitions | ERROR |
-| BR-3 | `switch` `case` labels align with `switch` keyword | WARNING |
+| BR-1 | All `if`/`for`/`while`/`do` bodies: braces always, even single-statement (MISRA 15.6) | ERROR |
+| BR-2 | Opening brace: same line as control statement (K&R); new line for function definitions | ERROR |
+| BR-3 | `case` labels align with `switch` | WARNING |
+| BR-4 | `switch` over `enum`: enumerate every value explicitly; no `default:`-only catch-all. Exhaustive cases enable compiler warning on new enum values. If `default:` needed, still list all known values above it. | WARNING |
 
 ### 11. Spacing
 
 | ID | Rule | Severity |
 |----|------|----------|
-| SP-1 | Single space around arithmetic, assignment, boolean, and comparison operators | ERROR |
-| SP-2 | Space between control keyword and opening parenthesis: `if (`, `for (`, `while (` | ERROR |
-| SP-3 | No space between function name and opening parenthesis | ERROR |
-| SP-4 | Pointer `*` aligns with the variable name, not the type: `uint8_t *foo` | WARNING |
-| SP-5 | No space between `*` and function-pointer name in struct definitions | WARNING |
+| SP-1 | Single space around operators (arithmetic, assignment, bool, comparison) | ERROR |
+| SP-2 | Space between keyword + `(`: `if (`, `for (`, `while (` | ERROR |
+| SP-3 | No space between function name + `(` | ERROR |
+| SP-4 | `*` near variable name, not type: `uint8_t *foo` | WARNING |
+| SP-5 | No space: `*` + fn-pointer name in struct | WARNING |
+| SP-6 | Multi-line call args: align with opening `(` using spaces (coding-style.html#alignment) | WARNING |
+| SP-7 | Single blank line between logically distinct phases within a function (e.g. validation → computation → return). No blank line between every statement; one blank line per phase boundary max. | WARNING |
 
 ### 12. Error Handling
 
 | ID | Rule | Severity |
 |----|------|----------|
-| EH-1 | Use `assert()` for programming errors (bad arguments, internal inconsistencies) | WARNING |
-| EH-2 | Use `WARN` + recovery for non-critical errors from external sources | WARNING |
-| EH-3 | Use `ERROR` + `panic()` for unexpected unrecoverable errors | WARNING |
-| EH-4 | Use `ERROR` + `plat_error_handler()` for expected unrecoverable errors | WARNING |
-| EH-5 | Do not use `printf`; use `ERROR`, `WARN`, `INFO`, `VERBOSE` macros from `debug.h` | ERROR |
-| EH-6 | Before using any variable or parameter as a divisor, guard with `assert(divisor != 0U)` immediately before the division to prevent undefined behavior from divide-by-zero; the divisor guard is a programming-error assertion (not a runtime check) | ERROR |
-| EH-7 | Decrement of a reference count or counter must be preceded by an assertion that the count is non-zero (e.g., `assert(__atomic_load_n(&x->ref_count, __ATOMIC_ACQUIRE) > 0U)`); wraparound on underflow silently corrupts state | ERROR |
+| EH-1 | `assert()` for programming errors (bad args, internal inconsistencies) | WARNING |
+| EH-2 | `WARN` + recovery for non-critical external errors | WARNING |
+| EH-3 | `ERROR` + `panic()` for unexpected unrecoverable errors | WARNING |
+| EH-4 | `ERROR` + `plat_error_handler()` for expected unrecoverable errors | WARNING |
+| EH-5 | No `printf`; use `ERROR`/`WARN`/`INFO`/`VERBOSE` from `debug.h` | ERROR |
+| EH-6 | Before any division: `assert(divisor != 0U)`. Programming-error assertion, not runtime check. | ERROR |
+| EH-7 | Ref count decrement: assert non-zero first (e.g. `assert(__atomic_load_n(&x->ref_count, __ATOMIC_ACQUIRE) > 0U)`). Underflow wraparound silently corrupts state. | ERROR |
+| EH-8 | Potentially overflowing `uint64_t` arithmetic: `check_u64_overflow()` (`include/lib/utils_def.h`); `uint32_t`: `check_u32_overflow()`. Ad-hoc `UINT64_MAX`/`SIZE_MAX` comparison without comment = insufficient. | WARNING |
+| EH-9 | Int-returning fns must propagate real errors. Always-`return 0` fn → use `void` or document rationale. `if (ret != 0)` after always-0 fn = dead code. Don't swallow timeouts/failures. | WARNING |
+| EH-10 | Log levels: `VERBOSE`=debug traces; `INFO`=init milestones; `WARN`=recoverable + fallback; `ERROR`=unrecoverable → `panic()`/`plat_error_handler()`. Wrong level = flagged. | WARNING |
+| EH-11 | Check return values of called functions before using output. Unchecked failures silently propagate corrupt state. Exception: functions documented as always-succeeding (`void` or contract-guaranteed `0`). | WARNING |
 
 ### 13. Concurrency and Atomic Access
 
 | ID | Rule | Severity |
 |----|------|----------|
-| CA-1 | Variables accessed via `__atomic_*` operations in any one place must be accessed via `__atomic_load_n()`/`__atomic_store_n()` everywhere — never mix atomic writes with plain (non-atomic) reads of the same variable; inconsistency defeats the memory-ordering guarantee | WARNING |
-| CA-2 | Atomic variables must not be read with plain C assignment syntax (e.g., `x = obj->flags`) if they are ever written with an atomic operation elsewhere in the same scope | WARNING |
+| CA-1 | Vars touched by any `__atomic_*` op: use `__atomic_load_n()`/`__atomic_store_n()` everywhere. Never mix atomic write + plain read — defeats memory ordering. | WARNING |
+| CA-2 | No plain read (`x = obj->flags`) of vars written atomically elsewhere in scope | WARNING |
+| CA-3 | Shared MMIO / inter-CPU communication on multi-core: include ARMv8 memory barriers. Match barrier to hazard: `dsb sy` before/after DMA; `dmb ish` for CPU-to-CPU shared data; `isb` after system register writes. | WARNING |
 
 ### 14. Makefile
 
 | ID | Rule | Severity |
 |----|------|----------|
-| MK-1 | Use tabs for indentation, not spaces | ERROR |
-| MK-2 | Line continuation `\` must not be followed by trailing spaces | WARNING |
-| MK-3 | New source files must be added to the appropriate `_SOURCES` variable | ERROR |
+| MK-1 | Tabs for indentation, not spaces | ERROR |
+| MK-2 | No trailing spaces after `\` continuation | WARNING |
+| MK-3 | New source files: add to appropriate `_SOURCES` variable | ERROR |
 
-### 15. Build Verification
-
-| ID | Rule | Severity |
-|----|------|----------|
-| BV-1 | Patch applies cleanly with `git am` (no conflicts, no rejected hunks) | ERROR |
-| BV-2 | `git am` produces no whitespace warnings | WARNING |
-| BV-3 | `./MAKEALL` completes with no errors for all targets | ERROR |
-| BV-4 | `./MAKEALL` produces no new warnings | WARNING |
-
-### 16. Patch Series Organization
+### 15. Documentation (RST)
 
 | ID | Rule | Severity |
 |----|------|----------|
-| PS-1 | Each patch in a series must build cleanly on its own (applied on top of the preceding patch); there must be no forward-compilation dependency where patch N requires a file or symbol introduced only in patch N+1 | ERROR |
-| PS-2 | Prefer smaller, focused patches over monolithic ones; each patch should introduce one logical change (new driver, Makefile integration, board config, etc.) | WARNING |
-| PS-3 | If patch N adds source files that are not yet wired into a Makefile (because the Makefile change is in patch N+1), document this in the commit message so reviewers know the file is intentionally unreferenced until the next patch | WARNING |
+| DOC-1 | New driver under `drivers/`: add/update page in `docs/drivers/` (purpose, usage, platform config) | WARNING |
+| DOC-2 | New platform port under `plat/`: add page in `docs/plat/` (platform overview, build instructions, limitations) | WARNING |
+| DOC-3 | New/changed build options → `docs/getting_started/build-options.rst` (see also CM-9) | WARNING |
+| DOC-4 | `plat_*` hook changes, BL handoff struct changes, shared header API changes → update `docs/porting-guide.rst` | WARNING |
+
+### 16. Build Verification
+
+| ID | Rule | Severity |
+|----|------|----------|
+| BV-1 | `git am` applies cleanly (no conflicts, no rejected hunks) | ERROR |
+| BV-2 | `git am`: no whitespace warnings | WARNING |
+| BV-3 | `./MAKEALL`: no errors for all targets | ERROR |
+| BV-4 | `./MAKEALL`: no new warnings | WARNING |
+| BV-5 | CI style check: no new errors/warnings; no "WARNING: adding a line without newline at end of file". Manual: `git diff HEAD~1..HEAD \| ./scripts/checkpatch.pl --no-tree` | WARNING |
+
+### 17. Patch Series Organization
+
+| ID | Rule | Severity |
+|----|------|----------|
+| PS-1 | Each patch builds cleanly alone; no forward dependency where N needs symbol from N+1 | ERROR |
+| PS-2 | Small, focused patches; one logical change per patch (driver, Makefile, board config, etc.) | WARNING |
+| PS-3 | Patch N adds files not yet in Makefile (wired in N+1): note in commit message that file is intentionally unreferenced | WARNING |
+| PS-4 | New/modified platform port: update `docs/about/maintainers.rst` with path + code owner. Missing = no `Code-Owner-Review+1` = no merge. | WARNING |
+| PS-5 | Series ordering: foundational first — shared headers before consumers; driver core before Makefile; common code before platform-specific. Wrong order forces reviewers to read patches against missing context. | WARNING |
 
 ---
 
@@ -208,30 +246,38 @@ For each patch in the series:
   1. [ ] Fetch change from Gerrit (gerrit-review MCP)
   2. [ ] Apply to local review tree (git cherry-pick FETCH_HEAD)
   3. [ ] Apply to build tree (git am), note any whitespace warnings (BV-2)
-  4. [ ] Run ./MAKEALL from build root directory (not TFA clone) (BV-3, BV-4)
-  5. [ ] Check commit message (CM-1 through CM-8)
+  4. [ ] Run `./MAKEALL` from build root (not TFA clone) (BV-3, BV-4)
+  4a.[ ] Run checkpatch style check (BV-5)
+  5. [ ] Check commit message (CM-1 through CM-9)
   6. [ ] Check each new/modified .h file:
+         - SPDX license header present (WS-7)
          - Header guard (HG-1, HG-2, HG-3)
-         - Include ordering (IN-1 through IN-4)
+         - Include ordering (IN-1 through IN-4, IN-6: <cdefs.h> is group 2)
          - Typedefs (TY-2)
-         - Macro definitions (MA-1 through MA-4)
+         - Macro definitions (MA-1 through MA-8)
          - Comment style (CO-1, CO-2)
+         - Inline function documentation (CO-6, CO-7, CO-8)
          - Trailing blank line at EOF (WS-5)
   7. [ ] Check each new/modified .c file:
-         - Include ordering (IN-1 through IN-4)
-         - Unused includes (IN-5): verify every #include is actually used
-         - Variable declarations (VD-1, VD-2)
-         - Types (TY-1, TY-3 through TY-9)
-         - Comment style (CO-1 through CO-4)
-         - Spacing (SP-1 through SP-5)
-         - Braces (BR-1, BR-2)
-         - Error handling (EH-1 through EH-7)
-         - Atomic consistency (CA-1, CA-2)
+         - SPDX license header present (WS-7)
+         - Include ordering (IN-1 through IN-4, IN-6)
+         - Unused includes (IN-5): verify every `#include` is used
+         - Variable declarations (VD-1 through VD-5); early returns OK (VD-4)
+         - Types (TY-1, TY-3 through TY-12)
+         - Comment style (CO-1 through CO-8)
+         - Static helper comments (CO-5)
+         - Spacing (SP-1 through SP-7)
+         - Braces (BR-1 through BR-4)
+         - Error handling (EH-1 through EH-11)
+         - Atomic + barrier consistency (CA-1 through CA-3)
   8. [ ] Check Makefile changes (MK-1 through MK-3)
   8a.[ ] Check patch series atomicity (PS-1): verify each patch builds cleanly without its successors
-  9. [ ] Save the review report as /tmp/<change_id>_ps<N>_review_report.md
-         (see Report Format section for required structure)
- 10. [ ] Draft review comment and submit via Gerrit
+  8b.[ ] New platform port? Check maintainers.rst + docs/plat/ updated (PS-4, PS-5, DOC-2)
+  8c.[ ] New driver? Check docs/drivers/ updated (DOC-1)
+  8d.[ ] API/porting-guide changes? Check docs/porting-guide.rst updated (DOC-4)
+  9. [ ] Save report: `/tmp/<change_id>_ps<N>_review_report.md`
+ 10. [ ] Present report to user
+ 11. [ ] Ask: "Submit to Gerrit? (default: NO)" — wait for explicit YES. Never submit autonomously.
 ```
 
 ## Report format
@@ -239,7 +285,7 @@ For each patch in the series:
 Save to `/tmp/<change_id>_ps<N>_review_report.md`.
 Example: `/tmp/45537_ps14_review_report.md`
 
-Required sections in order:
+Sections in order:
 
 ### 1. Header
 
@@ -256,7 +302,7 @@ Required sections in order:
 
 ### 2. Previous Patchset Review Comment Links
 
-Table of prior patchsets with reviewer comments. Include diff view link for quick navigation.
+Prior patchsets with reviewer comments + diff view link.
 
 ```markdown
 | Patchset | Reviewer | Comment count | Link |
@@ -283,11 +329,11 @@ Two tables: severity breakdown + fix-status breakdown.
 ### 4. Consolidated Findings Table
 
 One row per finding. Columns:
-- **File**: full path from TFA repo root (backtick-quoted)
-- **Line**: line number(s); `(throughout)` for file-wide issues
+- **File**: full path from TFA root (backtick-quoted)
+- **Line**: line number(s); `(throughout)` for file-wide
 - **Rule**: rule ID (e.g. `MA-1`)
 - **Sev**: `ERROR` or `WARNING`
-- **Preexisting**: `Yes` if in prior review; `No (NEW)` if first seen
+- **Preexisting**: `Yes` if prior review; `No (NEW)` if first seen
 - **Link**: `[LNN](https://review.trustedfirmware.org/c/.../+/<id>/<ps>/<file>@<line>)` — omit `@<line>` for file-level
 - **Status**: `FIXED`, `PARTIAL`, `NOT FIXED`, or `NEW`
 - **Notes**: one-line description
@@ -300,11 +346,11 @@ One row per finding. Columns:
 
 ### 5. Previous Gerrit Comments Not Addressed
 
-Source: inline Gerrit comments from Gerrit API (`include_comments: true`), all prior patchsets, all reviewers.
-Do NOT populate from own rule findings — only human reviewer comments on the change.
+Source: Gerrit API (`include_comments: true`), all patchsets, all reviewers.
+Don't populate from own findings — only comments left by human reviewers.
 
-For each prior comment, verify in current code whether request was addressed.
-Author marking "resolved" in Gerrit ≠ fixed — always check code.
+For each, verify in current code whether addressed.
+"Resolved" in Gerrit ≠ fixed — always check code.
 
 ```markdown
 ## Previous Gerrit Comments Not Addressed
@@ -333,7 +379,7 @@ Note: all N were marked "resolved" by the author in PS<N>.
 | BV-4 | `./MAKEALL` produces no new warnings | PASS/FAIL | |
 ```
 
-Note if platform not in MAKEALL defconfig list (new driver code not actually compiled by MAKEALL).
+Note if platform not in MAKEALL defconfig list (driver not compiled by MAKEALL).
 
 ---
 
