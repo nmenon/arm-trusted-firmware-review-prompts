@@ -97,6 +97,7 @@ For each patch under review:
 | IN-2 | Within each group, includes are in alphabetical order | WARNING |
 | IN-3 | Use `<...>` for headers not in the same directory; `"..."` for same-directory headers | WARNING |
 | IN-4 | No project or platform headers appear before system headers | ERROR |
+| IN-5 | No unused `#include` directives — every included header must have at least one identifier (macro, type, function) from it actually used in the file; verify by checking all identifiers in the header against usage in the .c file | WARNING |
 
 ### 6. Naming
 
@@ -106,6 +107,9 @@ For each patch under review:
 | NM-2 | Preprocessor macros: `UPPER_SNAKE_CASE` | ERROR |
 | NM-3 | No abbreviations that obscure meaning | WARNING |
 | NM-4 | Typos in identifiers or comments must be corrected | WARNING |
+| NM-5 | Platform-specific macros, functions, and types that are not `static` must carry a platform-specific prefix (`ti_`, `TI_`, `k3_`, `K3_`, `am62l_`, `AM62L_` etc.) to avoid future conflicts with TF-A common APIs or standard library names. Generic names like `FIELD_GET`, `FIELD_PREP`, `log2`, `board_init` with no prefix are prohibited at non-static scope. | ERROR |
+| NM-6 | Never define identifiers beginning with `__` (double underscore) in platform or driver code; this namespace is reserved for the compiler and C standard library implementation per ISO C11 §7.1.3. | ERROR |
+| NM-7 | Before introducing a new platform utility macro or function, search the upstream TF-A tree (`include/`, `lib/`, `drivers/`) for an existing equivalent. Prefer reusing or contributing to a common header over duplicating. Example: `FIELD_GET`/`FIELD_PREP`/`__bf_shf` already exist in `include/drivers/cadence/cdns_nand.h`. | WARNING |
 
 ### 7. Types and Portability
 
@@ -117,8 +121,9 @@ For each patch under review:
 | TY-4 | Integer literals assigned to unsigned variables carry the `U` suffix (e.g., `1U`) | WARNING |
 | TY-5 | No floating-point types (`double`, `float`) in driver/firmware code | ERROR |
 | TY-6 | No use of `long` or `unsigned long`; use `long long` / `uint64_t` for 64-bit values | WARNING |
-| TY-7 | No implicit boolean conversions from non-boolean expressions (MISRA 14.4) | WARNING |
+| TY-7 | No implicit boolean conversions from non-boolean expressions (MISRA 14.4): pointer comparisons must be explicit `(p != NULL)` not `(p)`; integer comparisons must be explicit `(x != 0U)` not `(x)` | WARNING |
 | TY-8 | Pointer to MMIO or arbitrary address: use `uintptr_t` (see coding-guidelines §pointer types) | ERROR |
+| TY-9 | Printf format specifiers must match argument type: use `%u` (or `PRIu32` from `<inttypes.h>`) for `uint32_t`, not `%d`; similarly `%lu`/`PRIu64` for `uint64_t`. Mismatched format specifiers are UB and cause compiler warnings. | ERROR |
 
 ### 8. Macros
 
@@ -164,8 +169,17 @@ For each patch under review:
 | EH-3 | Use `ERROR` + `panic()` for unexpected unrecoverable errors | WARNING |
 | EH-4 | Use `ERROR` + `plat_error_handler()` for expected unrecoverable errors | WARNING |
 | EH-5 | Do not use `printf`; use `ERROR`, `WARN`, `INFO`, `VERBOSE` macros from `debug.h` | ERROR |
+| EH-6 | Before using any variable or parameter as a divisor, guard with `assert(divisor != 0U)` immediately before the division to prevent undefined behavior from divide-by-zero; the divisor guard is a programming-error assertion (not a runtime check) | ERROR |
+| EH-7 | Decrement of a reference count or counter must be preceded by an assertion that the count is non-zero (e.g., `assert(__atomic_load_n(&x->ref_count, __ATOMIC_ACQUIRE) > 0U)`); wraparound on underflow silently corrupts state | ERROR |
 
-### 13. Makefile
+### 13. Concurrency and Atomic Access
+
+| ID | Rule | Severity |
+|----|------|----------|
+| CA-1 | Variables accessed via `__atomic_*` operations in any one place must be accessed via `__atomic_load_n()`/`__atomic_store_n()` everywhere — never mix atomic writes with plain (non-atomic) reads of the same variable; inconsistency defeats the memory-ordering guarantee | WARNING |
+| CA-2 | Atomic variables must not be read with plain C assignment syntax (e.g., `x = obj->flags`) if they are ever written with an atomic operation elsewhere in the same scope | WARNING |
+
+### 14. Makefile
 
 | ID | Rule | Severity |
 |----|------|----------|
@@ -173,7 +187,7 @@ For each patch under review:
 | MK-2 | Line continuation `\` must not be followed by trailing spaces | WARNING |
 | MK-3 | New source files must be added to the appropriate `_SOURCES` variable | ERROR |
 
-### 14. Build Verification
+### 15. Build Verification
 
 | ID | Rule | Severity |
 |----|------|----------|
@@ -181,6 +195,14 @@ For each patch under review:
 | BV-2 | `git am` produces no whitespace warnings | WARNING |
 | BV-3 | `./MAKEALL` completes with no errors for all targets | ERROR |
 | BV-4 | `./MAKEALL` produces no new warnings | WARNING |
+
+### 16. Patch Series Organization
+
+| ID | Rule | Severity |
+|----|------|----------|
+| PS-1 | Each patch in a series must build cleanly on its own (applied on top of the preceding patch); there must be no forward-compilation dependency where patch N requires a file or symbol introduced only in patch N+1 | ERROR |
+| PS-2 | Prefer smaller, focused patches over monolithic ones; each patch should introduce one logical change (new driver, Makefile integration, board config, etc.) | WARNING |
+| PS-3 | If patch N adds source files that are not yet wired into a Makefile (because the Makefile change is in patch N+1), document this in the commit message so reviewers know the file is intentionally unreferenced until the next patch | WARNING |
 
 ---
 
@@ -202,13 +224,16 @@ For each patch in the series:
          - Trailing blank line at EOF (WS-5)
   7. [ ] Check each new/modified .c file:
          - Include ordering (IN-1 through IN-4)
+         - Unused includes (IN-5): verify every #include is actually used
          - Variable declarations (VD-1, VD-2)
-         - Types (TY-1, TY-3 through TY-8)
+         - Types (TY-1, TY-3 through TY-9)
          - Comment style (CO-1 through CO-4)
          - Spacing (SP-1 through SP-5)
          - Braces (BR-1, BR-2)
-         - Error handling (EH-1 through EH-5)
+         - Error handling (EH-1 through EH-7)
+         - Atomic consistency (CA-1, CA-2)
   8. [ ] Check Makefile changes (MK-1 through MK-3)
+  8a.[ ] Check patch series atomicity (PS-1): verify each patch builds cleanly without its successors
   9. [ ] Save the review report as /tmp/<change_id>_ps<N>_review_report.md
          (see Report Format section for required structure)
  10. [ ] Draft review comment and submit via Gerrit
@@ -353,6 +378,35 @@ new driver code is not actually compiled by MAKEALL).
 | `ti_pm_types.h` | CO-2 | `ti_dev_idx_t` has no doc comment |
 | `ti_pm_types.h` | HG-2 | `#endif` missing guard comment (`/* TI_PM_TYPES_H */`) |
 | commit | CM-4 | Body too brief; no motivation or design rationale |
+
+## Reference: Issues Found in 39036 PS23 (DDR driver) and 39040 PS23 (BL1 support)
+
+| File | Rule | Finding |
+|------|------|---------|
+| `cps_drv_lpddr4.h` | NM-7 | `CPS_FLD_READ`/`CPS_FLD_WRITE` use `FIELD_GET`/`FIELD_PREP` — identical macros already in `include/drivers/cadence/cdns_nand.h`; include that instead |
+| `plat_utils.h` | NM-7 | Entire file is duplicate of `include/drivers/cadence/cdns_nand.h`; remove and reuse existing |
+| `plat_utils.h` | NM-6 | `__bf_shf` uses `__` reserved prefix (ISO C11 §7.1.3) |
+| `am62l_ddrss.c` | NM-5 | `log2()` shadows stdlib, no platform prefix — rename to `am62l_log2()` |
+| `board_config.c` | NM-5 | `board_init()` has no platform prefix — rename to `am62l_board_init()` |
+| `cps_drv_lpddr4.h` + `platform.mk` | PS-1 | Series violation: 39036 files cannot compile without `FIELD_GET`/`FIELD_PREP` from 39040 — fix by including `cdns_nand.h` in `cps_drv_lpddr4.h` |
+| `am62l_ddrss.c` | EH | PI training status (PI_83) logged but not checked for error bits — silent training failure (Cadence_DDR_PI_User_Guide.pdf p.23 Table 7-1) |
+| `am62l_ddrss.c` | EH | `set_main_psc_state()` unbounded polling loops + always returns 0 |
+| `am62l_bl1_setup.c` | CO | Non-standard BL1: `bl1_platform_setup()` enters WFI, never returns — TF-A BL2 path dead code; undocumented |
+| `plat_utils.h` | EH (SUSPECT) | `__bf_shf(0)` UB if zero mask passed |
+
+## Reference: Issues Found in 45540 PS14 (clock core)
+
+| File | Rule | Finding |
+|------|------|---------|
+| `ti_clk.c` | IN-2 | System headers not in alphabetical order: `<errno.h>` after `<assert.h>` but before `<limits.h>` and `<stddef.h>` |
+| `ti_clk.c` | IN-5 | `<ti_container_of.h>` included but never used (no `container_of` call in file) |
+| `ti_clk.c` | TY-7 | `if (p && p->div)` — should be `if ((p != NULL) && (p->div != 0U))` |
+| `ti_clk.c` | EH-6 | `UINT32_MAX / div` with no `assert(div != 0U)` — divide-by-zero UB if caller passes zero |
+| `ti_clk.c` | VD-1 | Multiple `struct ti_clk *parent` declarations not at top of enclosing block (lines 151, 231, 276, 311, 401) |
+| `ti_clk.c` | TY-4 | `if (ret != 0U)` — comparison against `0U` when `ret` is `uint32_t`; also `if (ret)` for non-boolean |
+| `ti_clk.c` | TY-9 | `VERBOSE`/`WARN` use `%d` for `uint32_t` arguments; must use `%u` |
+| `ti_clk.c` | EH-7 | `__atomic_sub_fetch(&clkp->ref_count, 1U, ...)` with no guard that `ref_count > 0`; double-put wraps `uint8_t` to 255 |
+| `ti_clk.c` | CA-1 | `soc_clocks[i].flags` read non-atomically in `ti_clk_init`'s second loop; all other flag accesses use `__atomic_load_n()` |
 
 ## Reference: Issues Found in 45538 (div driver)
 
