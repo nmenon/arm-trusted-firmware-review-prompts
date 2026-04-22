@@ -6,7 +6,9 @@ Rules for reviewing TF-A patches. Sources:
 - `docs/process/coding-guidelines.rst`
 - `docs/process/commit-style.rst`
 - MISRA C:2012 (as referenced by TF-A)
-- Observations from `ti-am62l-clk` series (changes 45537, 45538)
+- Pattern analysis of 500 merged `TF-A/trusted-firmware-a` patches (3985 inline reviewer comments mined via Gerrit API)
+- https://www.trustedfirmware.org/aipolicy/ (AI-assisted contribution policy)
+- Reference patch series: `ti-am62l-clk` (45537, 45538, 45539, 45540), DDR driver (39036 PS23), BL1 support (39040 PS23)
 
 Ask user for:
 - Path to local arm-trusted-firmware clone (reading files, applying patches)
@@ -237,6 +239,17 @@ For each patch under review:
 | PS-4 | New/modified platform port: update `docs/about/maintainers.rst` with path + code owner. Missing = no `Code-Owner-Review+1` = no merge. | WARNING |
 | PS-5 | Series ordering: foundational first — shared headers before consumers; driver core before Makefile; common code before platform-specific. Wrong order forces reviewers to read patches against missing context. | WARNING |
 
+### 18. AI-Assisted Contributions
+
+Per https://www.trustedfirmware.org/aipolicy/
+
+| ID | Rule | Severity |
+|----|------|----------|
+| AI-1 | AI-assisted contribution: add `Co-developed-by: <Tool Name>` trailer. Future: may switch to `Assisted-by:`. CI name-mismatch warning on `Co-developed-by:`/`Signed-off-by:` = expected false positive, not an error. | WARNING |
+| AI-2 | AI tool license: output use must not conflict with BSD-3-Clause or Open Source Definition. | ERROR |
+| AI-3 | AI output with third-party copyrighted material: confirm BSD-3-Clause-compatible license + provide attribution/license info in commit or file. | ERROR |
+| AI-4 | Follow employer's AI policy; may be stricter than TF-A's. | WARNING |
+
 ---
 
 ## Review Checklist Workflow
@@ -249,6 +262,7 @@ For each patch in the series:
   4. [ ] Run `./MAKEALL` from build root (not TFA clone) (BV-3, BV-4)
   4a.[ ] Run checkpatch style check (BV-5)
   5. [ ] Check commit message (CM-1 through CM-9)
+  5a.[ ] AI-assisted? Check `Co-developed-by:` trailer (AI-1); verify license compat (AI-2, AI-3)
   6. [ ] Check each new/modified .h file:
          - SPDX license header present (WS-7)
          - Header guard (HG-1, HG-2, HG-3)
