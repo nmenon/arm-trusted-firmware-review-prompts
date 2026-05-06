@@ -258,6 +258,11 @@ Checks beyond style — verify the code actually does what it claims.
 | CS-6 | Memory region mappings: end address must not exceed last valid register in TRM. Map only what is required; overmapping grants device-mode access to unmapped holes (data abort risk). Cite TRM section and address range. | WARNING |
 | CS-7 | `return 0` / `return SCMI_SUCCESS` at function end must be verified: ensure no intermediate `ret = -EIO` path exists that is then silently discarded. Final return must propagate real status. | ERROR |
 | CS-8 | For `plat_scmi_*` hooks: verify that all SCMI inputs (agent_id, scmi_id, pd_id, parent_id) are range-checked against actual table sizes before array access. NS caller controls these fields via shared memory. | ERROR |
+| CS-9 | Unsigned subtraction used to derive a computed index or output value: any expression `a - b` where both operands are unsigned and the result is written to an output buffer or used as a subsequent index must be preceded by a guard `if (a < b) return ERROR`. Unsigned wraparound silently produces a huge value — no memory corruption if the write stays within a fixed buffer, but the garbage value is returned to the caller (NS world) and may cause incorrect behavior downstream. | ERROR |
+| CS-10 | Narrowing cast on a computed platform ID (`(uint8_t)(BASE_ID + offset)`, `(uint16_t)(START + core)`, etc.): require a `CASSERT(BASE_ID + MAX_OFFSET <= TYPE_MAX, ...)` compile-time assertion or an explicit runtime bounds check before the cast. Without it, a future port to a larger SoC or an increased `BASE_ID` silently truncates the ID to a wrong value with no compiler warning. | WARNING |
+| CS-11 | Firmware-to-firmware IPC integrity stubs: if a messaging protocol defines a checksum or MAC field but the implementation stubs it out (`checksum = 0`, `/* TODO: verify */`, `(void)checksum`), flag any new code path that calls security-critical operations over that channel (e.g. setting a boot address, transferring ownership of a hardware protection unit, releasing a processor). Note the stub, verify the hardware channel prevents NS access to the shared memory region, and document the residual risk. New callers must not assume message integrity beyond sequence-number matching. | WARNING |
+| CS-12 | Hardware protection unit reconfiguration (firewall, TZPC, MPU, TZASC region set/owner-change): verify (a) call sites are restricted to early platform init (`bl31_early_platform_setup`, `bl31_plat_arch_setup`, `ti_soc_init`, or equivalent) and are unreachable after NS world is running; (b) all arguments (region IDs, permission masks, address ranges) are compile-time constants or platform-internal values — never derived from NS-supplied data; (c) any permissive configuration (all-host access, maximum address range) has an explicit comment citing the TRM section and the intended post-boot security model. | ERROR |
+| CS-13 | SMC dispatcher completeness: (a) every `case` in an SMC `smc_fid`/`smc_function_id` switch must terminate with an explicit `SMC_RET1`, `SMC_RET2`, `SMC_UUID_RET`, or equivalent — no implicit fall-through to the next case; the `default:` must return `SMC_UNK`. (b) Warm-boot entrypoint globals written in `plat_setup_psci_ops` or equivalent and later cast to a function pointer must only receive values from TF-A-internal code paths — trace the value back through the call chain and confirm no NS-supplied register or shared-memory field reaches the stored address. | ERROR |
 
 ### 19. AI-Assisted Contributions
 
@@ -305,6 +310,11 @@ For each patch in the series:
          - Error handling (EH-1 through EH-13)
          - Atomic + barrier consistency (CA-1 through CA-3)
          - Correctness/security: bounds on SCMI inputs (CS-1..CS-8)
+         - Unsigned subtraction for derived indices: guard a >= b before a - b (CS-9)
+         - Narrowing casts on computed IDs: CASSERT or runtime upper-bound guard (CS-10)
+         - IPC integrity stubs: flag security-critical callers where checksum is TODO (CS-11)
+         - Hardware protection unit reconfig: init-path-only, hardcoded args, permissive configs commented (CS-12)
+         - SMC dispatcher: all cases end with SMC_RET*, no fall-through; warm-boot entrypoint not NS-derived (CS-13)
          - Deep analysis: dead code, silent error drops, init ordering (CS-4..CS-7)
   8. [ ] Check Makefile changes (MK-1 through MK-3)
   8a.[ ] Check patch series atomicity (PS-1): verify each patch builds cleanly without its successors
@@ -431,6 +441,11 @@ For each changed function, check:
 - SCMI inputs (`agent_id`, `pd_id`, `scmi_id`) bounds-checked before array access
 - No `assert()` on NS-controlled inputs (DoS risk)
 - Signed/unsigned mismatch on error return checks (`if (*unsigned_ptr < 0)` = always false)
+- Unsigned subtraction used to compute a derived index or output value: verify `a >= b` guard present before `a - b` (CS-9)
+- Narrowing cast on `BASE + offset` platform ID: verify `CASSERT` or runtime upper-bound check covers all future port configurations (CS-10)
+- Firmware IPC message integrity: if protocol checksums are stubbed (`= 0`, `/* TODO */`), verify hardware channel prevents NS access and document residual risk for all security-critical callers (CS-11)
+- Hardware protection unit reconfig: restricted to init path, args not NS-derived, permissive configs justified (CS-12)
+- SMC dispatcher: every case terminates with SMC_RET*, default returns SMC_UNK, warm-boot entrypoint not NS-derived (CS-13)
 - Integer overflow in tolerance/range arithmetic
 - No dead code from hardcoded variables (`flags = 0U`)
 - Initialization ordering: APIs not callable before subsystem is ready
@@ -510,3 +525,15 @@ For each changed function, check:
 | `ti_clk_div.c` | CO-3 | "Hack" comment in production code |
 | `ti_clk.mk` | MK-1 | Mixed tabs/spaces before `\` continuation |
 | commit | CM-4 | Body too brief; no motivation or design rationale |
+
+## Reference: Issues Found in TI K3/AM62L SCMI+PSCI drivers (deepsec static analysis, 2026-05)
+
+These motivated CS-9, CS-10, and CS-11. Recorded here as concrete examples for future reviewers.
+
+| File | Rule | Severity | Finding |
+|------|------|----------|---------|
+| `plat/ti/common/scmi/ti_scmi_clock.c` | CS-9 | MEDIUM | `plat_scmi_clock_get_possible_parents`: `scmi_id - non_reserved_parents + i` wraps to `~0` when `scmi_id < non_reserved_parents`; write stays in fixed buffer but returns garbage parent clock IDs to NS world |
+| `plat/ti/k3low/common/am62l_psci.c` | CS-10 | LOW | `proc_id = (uint8_t)(PLAT_PROC_START_ID + (uint32_t)core)`: no `CASSERT` that `PLAT_PROC_START_ID + PLATFORM_CORE_COUNT - 1 <= UINT8_MAX`; safe today (AM62L, 1 core) but fragile across ports |
+| `drivers/ti/ti_sci/ti_sci.c` | CS-11 | LOW | TX checksum set to 0, RX checksum discarded (`/* TODO */`); hardware Secure Proxy mitigates, but security-critical callers (proc boot address, firewall owner change) rely on sequence-number matching only |
+| `plat/ti/k3low/common/drivers/firewall/firewall_config.c` | CS-12 | INFO/FP | `update_fwl_configs()` opens DDR/OSPI/ADC firewalls to all hosts — intentional post-ROM relaxation, only called from `ti_soc_init()` in BL31 early init. Confirmed false-positive for the rule; serves as the concrete example that motivated CS-12. |
+| `plat/ti/common/ti_svc.c` | CS-13 | INFO/FP | All switch cases in `ti_sip_smc_handler` terminate with `SMC_RET*`; `default:` returns `SMC_UNK`. Confirmed correct; serves as the concrete example that motivated CS-13. |
